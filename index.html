@@ -1,0 +1,513 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>贪吃蛇游戏：玩家 vs 电脑AI</title>
+  <style>
+    body {
+      font-family: Arial, sans-serif;
+      text-align: center;
+      margin: 0;
+      padding: 0;
+    }
+    canvas {
+      border: 1px solid black;
+      margin-top: 20px;
+    }
+    h1 {
+      margin-top: 20px;
+    }
+    .game-over {
+      font-size: 2em;
+      color: red;
+    }
+    #startScreen, #endScreen {
+      position: absolute;
+      top: 50%;
+      left: 50%;
+      transform: translate(-50%, -50%);
+      text-align: center;
+    }
+    #startScreen button, #endScreen button {
+      padding: 10px 20px;
+      font-size: 18px;
+      cursor: pointer;
+    }
+    #endScreen {
+      display: none;
+    }
+    #gameCanvas {
+      display: block;
+      margin: 0 auto;
+    }
+    #pauseScreen {
+      position: absolute;
+      top: 50%;
+      left: 50%;
+      transform: translate(-50%, -50%);
+      display: none;
+      text-align: center;
+    }
+    #score {
+      font-size: 20px;
+      font-weight: bold;
+    }
+    .instructions {
+      font-size: 18px;
+      margin: 10px 0;
+    }
+  </style>
+</head>
+<body>
+  <div id="startScreen">
+    <h1>贪吃蛇游戏：玩家 vs 电脑AI</h1>
+    <p class="instructions">欢迎来到贪吃蛇！</p>
+    <p class="instructions">玩家蛇的颜色是绿色，AI蛇的颜色是蓝色。</p>
+    <p class="instructions">使用箭头键控制玩家蛇，AI会自动追逐食物且绝不撞墙！</p>
+    <p class="instructions">如果当前方向无效，AI会尝试其他安全方向。</p>
+    <p class="instructions">快捷键：按 "P" 暂停游戏，按 "R" 重新开始游戏。</p>
+    <button onclick="startGame()">开始游戏</button>
+  </div>
+
+  <!-- 网格尺寸为35x35，每格20px → 画布700x700 -->
+  <canvas id="gameCanvas" width="700" height="700"></canvas>
+
+  <div id="score">
+    <p>玩家得分: <span id="playerScore">0</span></p>
+    <p>AI得分: <span id="aiScore">0</span></p>
+  </div>
+
+  <div id="pauseScreen">
+    <h2>游戏暂停</h2>
+    <button onclick="resumeGame()">继续游戏</button>
+    <button onclick="restartGame()">重新开始</button>
+  </div>
+
+  <div id="endScreen">
+    <h1 id="endMessage">游戏结束</h1>
+    <button onclick="restartGame()">重新开始</button>
+  </div>
+
+  <script>
+    const canvas = document.getElementById('gameCanvas');
+    const ctx = canvas.getContext('2d');
+    const playerScoreDisplay = document.getElementById('playerScore');
+    const aiScoreDisplay = document.getElementById('aiScore');
+    const startScreen = document.getElementById('startScreen');
+    const endScreen = document.getElementById('endScreen');
+    const pauseScreen = document.getElementById('pauseScreen');
+
+    // 游戏参数
+    const gridSize = 20;           // 每个方格的像素大小
+    const tileCount = 35;          // 网格 35x35
+    const canvasWidth = gridSize * tileCount; // 700px
+    const canvasHeight = gridSize * tileCount; // 700px
+    canvas.width = canvasWidth;
+    canvas.height = canvasHeight;
+
+    // 玩家和 AI 的蛇（初始位置）
+    let playerSnake = [{ x: 5, y: 5 }];
+    let aiSnake = [{ x: 10, y: 10 }];
+    let playerDirection = 'RIGHT';
+    let aiDirection = 'LEFT';
+
+    // 游戏状态
+    let gameOver = false;
+    let aiGameOver = false;
+    let playerLength = 1;
+    let aiLength = 1;
+    let playerScore = 0;
+    let aiScore = 0;
+
+    // 食物的位置
+    let food = generateFood();
+
+    // 定时器变量
+    let gameInterval;
+    let playerInterval;
+    let aiInterval;
+
+    // 辅助函数：计算曼哈顿距离
+    function manhattan(a, b) {
+      return Math.abs(a.x - b.x) + Math.abs(a.y - b.y);
+    }
+
+    // 游戏开始
+    function startGame() {
+      startScreen.style.display = 'none';
+      resetGame();
+      gameInterval = setInterval(gameLoop, 100);  // 游戏刷新间隔 100ms
+      playerInterval = setInterval(() => {
+        if (!gameOver && !aiGameOver) {
+          movePlayer();
+        }
+      }, 400);  // 玩家移动间隔 400ms
+      aiInterval = setInterval(() => {
+        if (!gameOver && !aiGameOver) {
+          moveAI();
+        }
+      }, 500);  // AI 移动间隔 500ms
+    }
+
+    // 游戏主循环
+    function gameLoop() {
+      if (gameOver || aiGameOver) {
+        showEndScreen();
+        return;
+      }
+      ctx.clearRect(0, 0, canvasWidth, canvasHeight);
+      updateSnake(playerSnake, playerDirection);
+      updateSnake(aiSnake, aiDirection);
+      checkCollision(playerSnake);
+      checkCollision(aiSnake);
+      if (checkFoodCollision(playerSnake)) {
+        playerLength++;
+        food = generateFood();
+        playerScore++;
+        updateScores();
+      }
+      if (checkFoodCollision(aiSnake)) {
+        aiLength++;
+        food = generateFood();
+        aiScore++;
+        updateScores();
+      }
+      drawSnake(playerSnake, 'green');
+      drawSnake(aiSnake, 'blue');
+      drawFood(food);
+    }
+
+    // 根据传入方向更新蛇的位置
+    function updateSnake(snake, direction) {
+      const head = { ...snake[0] };
+      switch (direction) {
+        case 'LEFT': head.x--; break;
+        case 'RIGHT': head.x++; break;
+        case 'UP': head.y--; break;
+        case 'DOWN': head.y++; break;
+      }
+      snake.unshift(head);
+      if (snake.length > (snake === playerSnake ? playerLength : aiLength)) {
+        snake.pop();
+      }
+    }
+
+    // 检测蛇是否撞墙或撞到自己
+    function checkCollision(snake) {
+      const head = snake[0];
+      if (head.x < 0 || head.x >= tileCount || head.y < 0 || head.y >= tileCount) {
+        if (snake === playerSnake) gameOver = true;
+        else aiGameOver = true;
+      }
+      for (let i = 1; i < snake.length; i++) {
+        if (head.x === snake[i].x && head.y === snake[i].y) {
+          if (snake === playerSnake) gameOver = true;
+          else aiGameOver = true;
+        }
+      }
+    }
+
+    // 检查蛇是否吃到食物
+    function checkFoodCollision(snake) {
+      const head = snake[0];
+      return head.x === food.x && head.y === food.y;
+    }
+
+    // 随机生成食物位置（保证在网格内）
+    function generateFood() {
+      return {
+        x: Math.floor(Math.random() * tileCount),
+        y: Math.floor(Math.random() * tileCount)
+      };
+    }
+
+    // 绘制蛇
+    function drawSnake(snake, color) {
+      snake.forEach(segment => {
+        ctx.fillStyle = color;
+        ctx.fillRect(segment.x * gridSize, segment.y * gridSize, gridSize, gridSize);
+      });
+    }
+
+    // 绘制食物
+    function drawFood(food) {
+      ctx.fillStyle = 'red';
+      ctx.fillRect(food.x * gridSize, food.y * gridSize, gridSize, gridSize);
+    }
+
+    // ---------------------------
+    // AI 控制部分：采用 A* 算法+安全检测（绝不撞墙）
+    // ---------------------------
+    function moveAI() {
+      const head = aiSnake[0];
+      const currentDistance = manhattan(head, food);
+      const path = astar(head, food);
+      if (path && path.length > 0) {
+        const nextDir = path[0];
+        // 模拟下一步的位置
+        let newHead = { x: head.x, y: head.y };
+        switch (nextDir) {
+          case 'LEFT': newHead.x--; break;
+          case 'RIGHT': newHead.x++; break;
+          case 'UP': newHead.y--; break;
+          case 'DOWN': newHead.y++; break;
+        }
+        // 若下一步安全且能使距离变短，则采用该方向
+        const newDistance = manhattan(newHead, food);
+        if (newDistance < currentDistance && isValidMove(newHead)) {
+          aiDirection = nextDir;
+          return;
+        }
+      }
+      // 如果上述方向无效，则采用备用安全策略，确保不会撞墙
+      fallbackSafeMove(head);
+    }
+
+    // 安全随机选择一个方向（确保不会撞墙或撞到 AI 自己）
+    function fallbackSafeMove(head) {
+      const possibleDirections = ['UP', 'DOWN', 'LEFT', 'RIGHT'];
+      let safeMoves = possibleDirections.filter(dir => {
+        let newHead = { x: head.x, y: head.y };
+        switch(dir) {
+          case 'LEFT': newHead.x--; break;
+          case 'RIGHT': newHead.x++; break;
+          case 'UP': newHead.y--; break;
+          case 'DOWN': newHead.y++; break;
+        }
+        return isValidMove(newHead);
+      });
+      if (safeMoves.length > 0) {
+        aiDirection = safeMoves[Math.floor(Math.random() * safeMoves.length)];
+      }
+    }
+
+    // A* 算法实现
+    function astar(start, target) {
+      // 将节点转换为字符串，作为哈希键
+      function hash(node) {
+        return node.x + ',' + node.y;
+      }
+      // 启发函数：曼哈顿距离
+      function heuristic(a, b) {
+        return Math.abs(a.x - b.x) + Math.abs(a.y - b.y);
+      }
+      // 获取相邻且不为障碍的节点
+      function getNeighbors(node) {
+        const dirs = [
+          { dx: 0, dy: -1 },
+          { dx: 0, dy: 1 },
+          { dx: -1, dy: 0 },
+          { dx: 1, dy: 0 }
+        ];
+        let result = [];
+        for (let d of dirs) {
+          let nx = node.x + d.dx;
+          let ny = node.y + d.dy;
+          if (nx >= 0 && nx < tileCount && ny >= 0 && ny < tileCount) {
+            if (!isObstacle({ x: nx, y: ny })) {
+              result.push({ x: nx, y: ny });
+            }
+          }
+        }
+        return result;
+      }
+
+      let openSet = new Set();
+      let openList = [];
+      let cameFrom = {};  // key: "x,y"  value: 父节点
+      let gScore = {};    // key: "x,y"  value: 起点到该节点的代价
+      let fScore = {};    // key: "x,y"  value: gScore + 启发值
+
+      for (let y = 0; y < tileCount; y++) {
+        for (let x = 0; x < tileCount; x++) {
+          const key = x + ',' + y;
+          gScore[key] = Infinity;
+          fScore[key] = Infinity;
+        }
+      }
+
+      const startKey = hash(start);
+      gScore[startKey] = 0;
+      fScore[startKey] = heuristic(start, target);
+      openSet.add(startKey);
+      openList.push(start);
+
+      while (openSet.size > 0) {
+        let current, currentKey;
+        let bestF = Infinity;
+        for (let node of openList) {
+          let key = hash(node);
+          if (openSet.has(key) && fScore[key] < bestF) {
+            bestF = fScore[key];
+            current = node;
+            currentKey = key;
+          }
+        }
+        if (current.x === target.x && current.y === target.y) {
+          return reconstructPath(cameFrom, current);
+        }
+        openSet.delete(currentKey);
+        openList = openList.filter(n => hash(n) !== currentKey);
+        let neighbors = getNeighbors(current);
+        for (let neighbor of neighbors) {
+          let neighborKey = hash(neighbor);
+          let tentative_gScore = gScore[currentKey] + 1;
+          if (tentative_gScore < gScore[neighborKey]) {
+            cameFrom[neighborKey] = current;
+            gScore[neighborKey] = tentative_gScore;
+            fScore[neighborKey] = tentative_gScore + heuristic(neighbor, target);
+            if (!openSet.has(neighborKey)) {
+              openSet.add(neighborKey);
+              openList.push(neighbor);
+            }
+          }
+        }
+      }
+      return null; // 如果无法到达目标则返回 null
+    }
+
+    // 重构路径，将节点序列转换为方向数组（例如 ['UP', 'LEFT', ...]）
+    function reconstructPath(cameFrom, current) {
+      function hash(node) {
+        return node.x + ',' + node.y;
+      }
+      let totalPath = [current];
+      while (cameFrom.hasOwnProperty(hash(current))) {
+        current = cameFrom[hash(current)];
+        totalPath.unshift(current);
+      }
+      let directions = [];
+      for (let i = 0; i < totalPath.length - 1; i++) {
+        let cur = totalPath[i];
+        let nxt = totalPath[i + 1];
+        if (nxt.x === cur.x + 1) directions.push('RIGHT');
+        else if (nxt.x === cur.x - 1) directions.push('LEFT');
+        else if (nxt.y === cur.y + 1) directions.push('DOWN');
+        else if (nxt.y === cur.y - 1) directions.push('UP');
+      }
+      return directions;
+    }
+    // ---------------------------
+    // AI 算法结束
+    // ---------------------------
+
+    // 判断一个格子是否为障碍（只考虑墙壁和 AI 自己的身体，不避开玩家蛇）
+    function isObstacle(cell) {
+      if (cell.x < 0 || cell.x >= tileCount || cell.y < 0 || cell.y >= tileCount) return true;
+      for (let segment of aiSnake) {
+        if (cell.x === segment.x && cell.y === segment.y) return true;
+      }
+      return false;
+    }
+
+    // 检查移动是否有效（避免撞墙和撞到 AI 自己）
+    function isValidMove(newHead) {
+      if (newHead.x < 0 || newHead.x >= tileCount || newHead.y < 0 || newHead.y >= tileCount) {
+        return false;
+      }
+      for (let segment of aiSnake) {
+        if (newHead.x === segment.x && newHead.y === segment.y) {
+          return false;
+        }
+      }
+      return true;
+    }
+
+    // 玩家移动（方向由键盘事件控制）
+    function movePlayer() {
+      updateSnake(playerSnake, playerDirection);
+    }
+
+    // 更新得分显示
+    function updateScores() {
+      playerScoreDisplay.textContent = playerScore;
+      aiScoreDisplay.textContent = aiScore;
+    }
+
+    // 显示游戏结束界面
+    function showEndScreen() {
+      clearInterval(gameInterval);
+      clearInterval(playerInterval);
+      clearInterval(aiInterval);
+      endScreen.style.display = 'block';
+      const winner = gameOver ? "你输了" : "你赢了！";
+      document.getElementById('endMessage').textContent = winner;
+      if (gameOver) {
+        document.getElementById('endMessage').style.color = 'red';
+        document.getElementById('endMessage').style.fontSize = '3em';
+        document.getElementById('endMessage').style.fontWeight = 'bold';
+      } else {
+        document.getElementById('endMessage').style.color = 'green';
+        document.getElementById('endMessage').style.fontSize = '3em';
+        document.getElementById('endMessage').style.fontWeight = 'bold';
+      }
+    }
+
+    // 重新开始游戏
+    function restartGame() {
+      endScreen.style.display = 'none';
+      startScreen.style.display = 'block';
+      resetGame();
+    }
+
+    // 重置游戏状态
+    function resetGame() {
+      gameOver = false;
+      aiGameOver = false;
+      playerSnake = [{ x: 5, y: 5 }];
+      aiSnake = [{ x: 10, y: 10 }];
+      playerLength = 1;
+      aiLength = 1;
+      food = generateFood();
+      playerDirection = 'RIGHT';
+      aiDirection = 'LEFT';
+      playerScore = 0;
+      aiScore = 0;
+      updateScores();
+    }
+
+    // 暂停游戏
+    function pauseGame() {
+      clearInterval(gameInterval);
+      clearInterval(playerInterval);
+      clearInterval(aiInterval);
+      pauseScreen.style.display = 'block';
+    }
+
+    // 继续游戏
+    function resumeGame() {
+      gameInterval = setInterval(gameLoop, 100);
+      playerInterval = setInterval(() => {
+        if (!gameOver && !aiGameOver) {
+          movePlayer();
+        }
+      }, 400);
+      aiInterval = setInterval(() => {
+        if (!gameOver && !aiGameOver) {
+          moveAI();
+        }
+      }, 500);
+      pauseScreen.style.display = 'none';
+    }
+
+    // 键盘事件：控制玩家蛇移动、暂停及重启游戏
+    document.addEventListener('keydown', (e) => {
+      if (gameOver || aiGameOver) return;
+      if (e.key === 'ArrowLeft' && playerDirection !== 'RIGHT') {
+        playerDirection = 'LEFT';
+      } else if (e.key === 'ArrowRight' && playerDirection !== 'LEFT') {
+        playerDirection = 'RIGHT';
+      } else if (e.key === 'ArrowUp' && playerDirection !== 'DOWN') {
+        playerDirection = 'UP';
+      } else if (e.key === 'ArrowDown' && playerDirection !== 'UP') {
+        playerDirection = 'DOWN';
+      } else if (e.key === 'p' || e.key === 'P') {
+        pauseGame();
+      } else if (e.key === 'r' || e.key === 'R') {
+        restartGame();
+      }
+    });
+  </script>
+</body>
+</html>
